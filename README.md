@@ -4,4 +4,4 @@ Neural decoding and real-time deployment for monaural sound source localization 
 
 Cooper Union ECE Senior Project, 2026-2027.
 
-**Status:** repository set up; code to follow.
+**Start here:** [`code/`](code/) holds the direction decoder: one notebook (`code/pinna_decoder.ipynb`) for data, preprocessing, training and evaluation, the `pinna` modules it calls, and the results so far.
