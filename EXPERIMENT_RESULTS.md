@@ -102,3 +102,85 @@ Next investigate which source families dominate the existing model's errors and
 test whether short-delay/phase descriptors improve those particular cases on
 validation data. Avoid claiming that phase has no useful structure, or that a
 shorter analysis window will necessarily improve localization.
+
+## Baseline failure analysis and richer magnitude experiment
+
+The baseline seen-direction seed-0 source means were 0.82 degrees (white/pink/click
+train), 0.94 (bursts), 7.20 (band noise), and 5.15 (harmonic). All 101 errors above
+45 degrees were in band noise (63/1264 examples) or harmonic sounds (38/1264).
+
+The baseline coverage diagnostic recreated the saved core wave order and examined
+those two difficult source families. It also regenerated matched clean/noisy
+synthetic waves from the same random-generator states, with clean signals used
+ONLY as an offline diagnostic. Saved at `code/runs/baseline_coverage_v2/coverage.json`.
+
+| Source and error group | Count | Median observed occupied fraction | Median true 2–20 kHz SNR |
+|---|---:|---:|---:|
+| Band noise, error <5 deg | 1104 | 38.5% | 31.2 dB |
+| Band noise, error >45 deg | 63 | 12.5% | 31.2 dB |
+| Harmonic, error <5 deg | 1128 | 43.2% | 17.2 dB |
+| Harmonic, error >45 deg | 38 | 100.0% | -5.5 dB |
+
+Occupied fraction uses bins within 20 dB of the strongest observed bin. The
+100% figure for harmonic failures is consistent with the observed spectrum being
+noise-dominated, not with a clean broadband source. Large band-noise errors also
+had smaller offline nearest-far-direction response gaps (median 0.77 dB versus
+1.95 dB in the <5-degree group), suggesting potential ambiguity over the excited
+frequencies. This is not a proof of a fundamental accuracy floor.
+
+These findings motivate examining the 2 kHz cutoff and noise reliability instead
+of assuming that more phase features will address every difficult example.
+Neither observed coverage nor the response-gap statistic is a deployment oracle.
+
+The first richer-magnitude comparison retains spectral shape and its derivative
+at 512/2048 FFT sizes. Both models use identical new features and the existing
+classification objective, data recipe and checkpoint selection. Seed-0 seen-direction
+results: original MLP 2.63 degrees, richer-input MLP 2.90 degrees, frequency CNN
+2.39 degrees. This is a modest initial CNN gain requiring additional seeds and
+held-out direction checks; the new models have different compute/parameter costs.
+
+### Completed spectral CNN comparison
+
+Additional seeds and held-out direction runs completed on Kahan. Exact means from
+saved metrics differ slightly from averages computed from rounded console values.
+
+| Seen-direction statistic across seeds 0, 1, 2 | Original magnitude MLP | Spectral CNN |
+|---|---:|---:|
+| Mean angular error, average +/- sample SD | 2.6938 +/- 0.1004 deg | 2.3668 +/- 0.0267 deg |
+| Average of median errors | 0.7533 deg | 0.7888 deg |
+| Average percent within 5 deg | 96.057% | 96.664% |
+| Average percent above 45 deg | 1.380% | 1.165% |
+| Parameters, seen-direction classifier | 277750 | 576248 |
+
+The mean error improvement is about 12.1%, repeated in all three seeds. Median
+error is slightly worse, and the candidate has about twice as many parameters
+plus a second FFT resolution. No Pi latency, power or real-recording improvement
+has yet been demonstrated.
+
+| Held-out protocol, seed 0 | Original MLP mean | Spectral CNN mean |
+|---|---:|---:|
+| Elevations | 4.9950 deg | 4.6395 deg |
+| Azimuth columns | 44.0774 deg | 39.9707 deg |
+
+The held-out azimuth problem remains severe. These protocols each use one training
+seed and are development diagnostics, not independent final validation.
+
+| Seed-0 source mean | Original MLP | Spectral CNN |
+|---|---:|---:|
+| Band noise | 7.2014 deg | 7.4086 deg |
+| Harmonic | 5.1502 deg | 3.4230 deg |
+| White | 0.8205 deg | 0.8307 deg |
+| Pink | 0.8169 deg | 0.8676 deg |
+| Bursts | 0.9435 deg | 0.9829 deg |
+| Click train | 0.8218 deg | 0.8221 deg |
+
+The main seed-0 gain is harmonic-source performance; band noise did not improve.
+The richer-input MLP's failure and CNN's gain do not separately prove which input
+channel or FFT resolution helps: both representation and inductive bias matter.
+
+`code/compare_spectral.py` verified paired source/direction arrays across each
+seed's baseline/CNN tests and saved exact metrics, an overlaid error histogram and
+a cumulative-error plot under `code/runs/spectral_comparison_v1/` on Kahan.
+Both distributions are from seed 0; the JSON separately reports three-seed averages.
+Thirteen local automated tests passed. Twelve tests passed on Kahan before the
+paired-SNR test was added, and the paired-SNR diagnostic then completed on GPU.
