@@ -5,6 +5,7 @@ are not model inputs, impossibility proofs, or calibrated uncertainty estimates.
 """
 import argparse
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -36,12 +37,27 @@ def main():
     offset = 0
     rows = []
     cond = evaluate.conditions("seen",quick=True)[0]
-    for w,idx,label in evaluate.batches(cond,dirs,ir,sr,data.mirror_elevation_index(az,el)):
+    gen = torch.Generator().manual_seed(cond.gen_seed())
+    def paired_batches():
+        for kind in cond.sources:
+            for _ in range(cond.draws):
+                for idx in np.array_split(dirs,max(1,len(dirs)//256)):
+                    state = gen.get_state()
+                    noisy = evaluate.synth(cond,ir,idx,kind,sr,gen)
+                    clean = None
+                    if kind in ("band","harmonic"):
+                        clean_gen = torch.Generator().set_state(state)
+                        clean = evaluate.synth(replace(cond,snr_db=None),ir,idx,kind,sr,clean_gen)
+                    yield noisy,clean,idx,kind
+    for w,clean,idx,label in paired_batches():
         stop = offset+len(idx)
         if not np.array_equal(true[offset:stop],idx) or not np.all(src[offset:stop] == label):
             raise ValueError("Saved example order does not match the recreated core battery")
         if label in ("band","harmonic"):
             power = stft_power(w).mean(-1)
+            clean_power = stft_power(clean).mean(-1).sum(-1)
+            noise_power = stft_power(w-clean).mean(-1).sum(-1).clamp_min(1e-20)
+            band_snr = (10*torch.log10(clean_power.clamp_min(1e-20)/noise_power)).cpu().numpy()
             active = power >= power.amax(-1,keepdim=True)*.01
             weights = active.float()/active.sum(-1,keepdim=True).clamp_min(1)
             gaps = []
@@ -57,13 +73,15 @@ def main():
             gap = torch.cat(gaps).cpu().numpy()
             for i in range(len(idx)):
                 rows.append({"source":label,"direction":int(idx[i]),"error_deg":float(errs[offset+i]),
-                             "occupied_fraction":float(coverage[i]),"far_response_gap_db":float(gap[i])})
+                             "occupied_fraction":float(coverage[i]),"far_response_gap_db":float(gap[i]),
+                             "band_snr_db":float(band_snr[i])})
         offset = stop
     if offset != len(errs):
         raise ValueError("Saved test set length does not match recreated test set")
     out = {"scope":"Offline diagnostic; response gap is not a bound on localization accuracy",
            "coverage_definition":"2-20 kHz Welch bins within 20 dB of peak observed band power",
            "gap_definition":"Nearest measured response >30 degrees away, weighted level-invariant log-magnitude RMS over occupied bins",
+           "snr_definition":"Exact paired clean/noisy synthetic waves, 2-20 kHz STFT power ratio; offline oracle diagnostic only",
            "summary":{},"examples":rows}
     for source in ("band","harmonic"):
         out["summary"][source] = {}
@@ -72,7 +90,7 @@ def main():
             group_rows = [r for r in rows if r["source"]==source and select(r)]
             out["summary"][source][group] = {"n":len(group_rows)}
             if group_rows:
-                for k in ("error_deg","occupied_fraction","far_response_gap_db"):
+                for k in ("error_deg","occupied_fraction","far_response_gap_db","band_snr_db"):
                     out["summary"][source][group]["median_"+k] = float(np.median([r[k] for r in group_rows]))
     a.output.mkdir(parents=True,exist_ok=False)
     (a.output/"coverage.json").write_text(json.dumps(out,indent=2))

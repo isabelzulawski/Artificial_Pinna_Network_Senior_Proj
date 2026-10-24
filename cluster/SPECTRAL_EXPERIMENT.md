@@ -46,6 +46,11 @@ examples. Coverage is the fraction of observed 2–20 kHz Welch bins within 20 d
 of the strongest bin. It includes sensor noise and direction-dependent filtering;
 it does not identify exactly which bins contain clean source signal.
 
+The updated diagnostic also recreates matched clean/noisy synthetic waves from
+identical generator states, to estimate the actual 2–20 kHz SNR. Clean waveforms
+are used only for diagnosis, never as model inputs or training labels. A 30 dB
+full-band SNR need not imply a 30 dB SNR in the model's analysis band.
+
 For offline diagnosis only, it computes the closest measured response more than
 30 degrees away in a level-invariant log-magnitude distance weighted over those
 bins. Small response gaps suggest potential ambiguities, but do not prove a
