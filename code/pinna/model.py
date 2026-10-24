@@ -84,6 +84,30 @@ class TemporalPhaseClassifier(nn.Module):
         return baseline + self.correction(self.fusion(z))
 
 
+class SpectralCNN(nn.Module):
+    """Independent frequency CNNs at 512/2048 FFT sizes; position retained."""
+    output_kind = "classification"
+
+    def __init__(self, n_classes):
+        super().__init__()
+        from .spectral_features import COUNTS
+        self.config = {"architecture": "spectral_cnn", "n_classes": n_classes}
+        self.branches = nn.ModuleList([nn.Sequential(
+            nn.Conv1d(2,16,7,stride=2,padding=3), nn.GELU(),
+            nn.Conv1d(16,16,5,stride=2,padding=2), nn.GELU(), nn.Flatten())
+            for _ in COUNTS])
+        width = sum(16*((n+3)//4) for n in COUNTS)
+        self.head = nn.Sequential(nn.Linear(width,128), nn.GELU(), nn.Linear(128,n_classes))
+
+    def forward(self, x):
+        from .spectral_features import COUNTS
+        parts, start = [], 0
+        for n, branch in zip(COUNTS, self.branches):
+            parts.append(branch(x[:, start:start+2*n].reshape(-1,2,n)))
+            start += 2*n
+        return self.head(torch.cat(parts, -1))
+
+
 def direction_loss(model, out, V_cls, v_true):
     """Cosine loss for continuous directions; original soft-label CE otherwise."""
     if model.output_kind == "regression":
@@ -138,6 +162,8 @@ def load(path, device=None):
     architecture = cfg.pop("architecture", "mlp")
     if architecture == "temporal_phase":
         m = TemporalPhaseClassifier(**cfg)
+    elif architecture == "spectral_cnn":
+        m = SpectralCNN(**cfg)
     elif architecture == "mlp":
         m = DirectionMLP(**cfg)
     else:

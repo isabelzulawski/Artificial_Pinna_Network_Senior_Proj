@@ -84,7 +84,7 @@ def _make_pool(ir, train_idx, cfg, gen, rng, chunk=256):
 def evaluate_set(model, X, dir_idx, V, V_cls, batch=4096):
     """Mean loss and great-circle errors of a model on precomputed features."""
     model.eval()
-    if isinstance(model, M.TemporalPhaseClassifier):
+    if isinstance(model, (M.TemporalPhaseClassifier, M.SpectralCNN)):
         batch = min(batch, 128)
     losses, errs = [], []
     for i in range(0, len(X), batch):
@@ -120,6 +120,10 @@ def fit(ir, V, train_idx, cfg, val=None, log=print):
             raise ValueError("Baseline and phase training must use the same preroll")
         model = M.TemporalPhaseClassifier(baseline.config).to(DEVICE)
         model.magnitude.load_state_dict(baseline.state_dict())
+    elif cfg.feature_mode == "spectral_cnn":
+        if cfg.output_kind != "classification":
+            raise ValueError("Spectral CNN uses the classification head")
+        model = M.SpectralCNN(len(train_idx)).to(DEVICE)
     else:
         model = M.DirectionMLP(feature_count(cfg.feature_mode), len(train_idx), cfg.hidden, cfg.depth,
                                output_kind=cfg.output_kind).to(DEVICE)

@@ -8,16 +8,19 @@ import torch
 import torch.nn.functional as F
 
 from .features import BAND, HOP, NFFT, N_FEATURES, features
+from .spectral_features import N_SPECTRAL, SPECTRAL_MODES, spectral_features
 
 TEMPORAL_FRAMES = 64
 TEMPORAL_CHANNELS = 4
 TEMPORAL_MODES = ("temporal_phase", "temporal_zero")
-MODES = ("magnitude", "phase", "phase_zero", *TEMPORAL_MODES)
+MODES = ("magnitude", "phase", "phase_zero", *TEMPORAL_MODES, *SPECTRAL_MODES)
 
 
 def feature_count(mode):
     if mode not in MODES:
         raise ValueError(f"Unknown feature mode: {mode}")
+    if mode in SPECTRAL_MODES:
+        return N_SPECTRAL
     if mode in TEMPORAL_MODES:
         return N_FEATURES + TEMPORAL_CHANNELS * N_FEATURES * TEMPORAL_FRAMES
     return N_FEATURES if mode == "magnitude" else 3 * N_FEATURES
@@ -59,6 +62,8 @@ def extract(w, mode="magnitude"):
     Silence/low energy contributes zero; circular cancellation remains meaningful.
     """
     feature_count(mode)
+    if mode in SPECTRAL_MODES:
+        return spectral_features(w)
     mag = features(w)
     if mode == "magnitude":
         return mag
