@@ -25,6 +25,7 @@ from .phase_features import extract, feature_count
 
 @dataclass
 class TrainConfig:
+    output_kind: str = "classification"
     feature_mode: str = "magnitude"
     preroll: int = 0  # 0 reproduces upstream; 4096 for matched streaming experiments
     seed: int = 0
@@ -86,8 +87,8 @@ def evaluate_set(model, X, dir_idx, V, V_cls, batch=4096):
     for i in range(0, len(X), batch):
         vt = V[torch.as_tensor(dir_idx[i:i + batch], device=DEVICE)]
         out = model(X[i:i + batch])
-        losses.append(float(M.loss_fn(out, V_cls, vt)) * len(vt))
-        errs.append(M.gc_error_deg(M.decode(out, V_cls)[0], vt).cpu().numpy())
+        losses.append(float(M.direction_loss(model, out, V_cls, vt)) * len(vt))
+        errs.append(M.gc_error_deg(M.direction_prediction(model, out, V_cls)[0], vt).cpu().numpy())
     model.train()
     e = np.concatenate(errs)
     return sum(losses) / len(X), e
@@ -105,7 +106,8 @@ def fit(ir, V, train_idx, cfg, val=None, log=print):
         val = make_validation_set(ir, train_idx, cfg)
     pool = _make_pool(ir, train_idx, cfg, gen, rng) if cfg.train_pool else None
 
-    model = M.DirectionMLP(feature_count(cfg.feature_mode), len(train_idx), cfg.hidden, cfg.depth).to(DEVICE)
+    model = M.DirectionMLP(feature_count(cfg.feature_mode), len(train_idx), cfg.hidden, cfg.depth,
+                           output_kind=cfg.output_kind).to(DEVICE)
     opt = torch.optim.AdamW(model.parameters(), cfg.lr, weight_decay=cfg.weight_decay)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, cfg.lr, total_steps=cfg.steps, pct_start=0.1)
     history, best, best_state, bad, run_loss, n_run = [], float("inf"), None, 0, 0.0, 0
@@ -121,7 +123,7 @@ def fit(ir, V, train_idx, cfg, val=None, log=print):
             j = order[pos:pos + cfg.batch]
             pos += cfg.batch
             x, b = pool[0][torch.as_tensor(j, device=DEVICE)], pool[1][j]
-        loss = M.loss_fn(model(x), V_cls, V_cls[torch.as_tensor(b, device=DEVICE)])
+        loss = M.direction_loss(model, model(x), V_cls, V_cls[torch.as_tensor(b, device=DEVICE)])
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
@@ -164,5 +166,5 @@ def predictor(model, V_cls, feature_mode="magnitude"):
     """Wrap a trained model as predict(waves (B, n)) -> (unit vectors (B, 3), confidence (B,))."""
     @torch.no_grad()
     def predict(w):
-        return M.decode(model(extract(w, feature_mode)), V_cls)
+        return M.direction_prediction(model, model(extract(w, feature_mode)), V_cls)
     return predict

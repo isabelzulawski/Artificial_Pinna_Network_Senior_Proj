@@ -40,6 +40,7 @@ def main():
     p.add_argument("--sofa", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True, help="New output directory; existing directories are rejected")
     p.add_argument("--mode", choices=MODES, default="magnitude")
+    p.add_argument("--head", choices=("classification", "regression"), default="classification")
     p.add_argument("--protocol", choices=("seen", "unseen_el", "unseen_az"), default="seen")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--steps", type=int, default=3000)
@@ -55,7 +56,7 @@ def main():
         p.error("CUDA is unavailable; refusing an accidental CPU cluster run")
     ir, az, el, sr = data.load_sofa(args.sofa)
     tr, te = data.split(args.protocol, az, el)
-    cfg = train.TrainConfig(feature_mode=args.mode, preroll=args.preroll, seed=args.seed,
+    cfg = train.TrainConfig(output_kind=args.head, feature_mode=args.mode, preroll=args.preroll, seed=args.seed,
                             steps=args.steps, batch=args.batch, eval_every=args.eval_every)
     args.output.mkdir(parents=True, exist_ok=False)
     root = Path(__file__).resolve().parents[1]

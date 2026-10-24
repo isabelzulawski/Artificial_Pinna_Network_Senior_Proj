@@ -22,18 +22,37 @@ RADIUS_DEG = 15.0
 
 
 class DirectionMLP(nn.Module):
-    def __init__(self, n_in, n_classes, hidden=256, depth=2):
+    def __init__(self, n_in, n_classes, hidden=256, depth=2, output_kind="classification"):
         super().__init__()
-        self.config = dict(n_in=n_in, n_classes=n_classes, hidden=hidden, depth=depth)
+        if output_kind not in ("classification", "regression"):
+            raise ValueError(output_kind)
+        self.output_kind = output_kind
+        self.config = dict(n_in=n_in, n_classes=n_classes, hidden=hidden, depth=depth,
+                           output_kind=output_kind)
         layers, h = [nn.LayerNorm(n_in)], n_in
         for _ in range(depth):
             layers += [nn.Linear(h, hidden), nn.GELU()]
             h = hidden
         self.body = nn.Sequential(*layers)
-        self.head = nn.Linear(hidden, n_classes)
+        self.head = nn.Linear(hidden, 3 if output_kind == "regression" else n_classes)
 
     def forward(self, x):
-        return self.head(self.body(x))  # logits over the training directions
+        out = self.head(self.body(x))
+        return F.normalize(out, dim=-1) if self.output_kind == "regression" else out
+
+
+def direction_loss(model, out, V_cls, v_true):
+    """Cosine loss for continuous directions; original soft-label CE otherwise."""
+    if model.output_kind == "regression":
+        return (1 - F.cosine_similarity(out, v_true, dim=-1)).mean()
+    return loss_fn(out, V_cls, v_true)
+
+
+def direction_prediction(model, out, V_cls):
+    """Regressors have no calibrated confidence; return None for it."""
+    if model.output_kind == "regression":
+        return out, None
+    return decode(out, V_cls)
 
 
 def soft_targets(V_cls, v_true, sigma_deg=SIGMA_DEG):

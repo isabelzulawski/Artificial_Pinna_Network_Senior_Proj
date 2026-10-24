@@ -1,5 +1,34 @@
 # Phase experiments on Kahan
 
+## Continuous-direction baseline
+
+The runner now accepts `--head regression`. It preserves the magnitude features
+and MLP hidden layers, replacing direction-class logits with three normalized
+coordinates and using cosine loss. Predictions are continuous unit vectors with
+no class-neighborhood decoding. No confidence score is claimed for regression.
+Classification remains the default and old classifier checkpoints still load.
+Loss values across heads are not directly comparable. Selection uses validation
+loss within each run; compare heads using angular errors on shared evaluation data.
+The regression head has fewer parameters, so this compares output formulations,
+not exactly equal parameter counts. A continuous prediction does not guarantee
+good interpolation; ambiguous directions can be averaged by regression.
+
+From your existing Kahan checkout, after all active runs finish:
+
+```bash
+git pull --ff-only
+/zooper2/isabel.zulawski/jupyter_venv/bin/python3 -u code/run_experiment.py \
+  --sofa "data/ArtificialPinnaB2_v2 1.sofa" \
+  --mode magnitude --head regression --protocol seen --seed 0 \
+  --steps 3000 --eval-every 250 --batch 256 --require-cuda \
+  --output code/runs/regression_magnitude_seen_s0
+```
+
+Use `--protocol unseen_el` and `--protocol unseen_az` with distinct output names
+for the same held-out-direction diagnostics as the classifier. Existing results
+are preserved. A separate temporal phase branch is planned after this head ablation;
+it is not implemented by `--head regression`.
+
 This branch adds a headless runner and optional features while leaving the upstream
 notebook's default magnitude model and zero-preroll training behavior intact.
 No accuracy improvement has been established. GPU execution must be checked on Kahan.
