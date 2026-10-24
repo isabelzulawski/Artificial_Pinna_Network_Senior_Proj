@@ -62,3 +62,43 @@ transient versus stationary source families, sensitivity to crop timing, and how
 much short-delay structure is lost by the STFT and local time pooling. Any
 clean-source or HRTF-phase oracle diagnostic must remain separate from deployment
 inputs: deployment has only the microphone recording.
+
+## Feature diagnostic on Kahan
+
+Diagnostic code commit: `c3cd123ae2d3eb45ba79f1f0f987584ba31b7219`.
+18 measured horizon directions, 8 independent training and 8 test realizations
+per direction/source family, 30 dB SNR and 1.365-second analysis windows. The
+centered cosine nearest-class-mean classifier fits templates only on training
+realizations. Chance accuracy is 5.56%; each test row has 144 examples.
+
+| Source | Magnitude | Compact phase-derived | Temporal phase-derived | Time mean of temporal channels |
+|---|---:|---:|---:|---:|
+| White noise | 100.0% | 99.3% | 100.0% | 100.0% |
+| Pink noise | 100.0% | 98.6% | 100.0% | 100.0% |
+| Band noise | 83.3% | 47.9% | 54.9% | 80.6% |
+| Harmonic | 75.7% | 20.8% | 8.3% | 10.4% |
+| Bursts | 100.0% | 72.9% | 33.3% | 99.3% |
+| Click train | 100.0% | 18.1% | 25.7% | 81.2% |
+
+The phase-derived representations contain reproducible directional structure in
+some conditions. Their masking/weighting also uses magnitude, and STFT phase
+statistics can reflect the signal spectrum, so this does NOT establish information
+independent of magnitude. Template results are not trained-model accuracy bounds.
+Magnitude is strong in cases where phase-derived features are strongest; those
+cases offer little headroom. Transient position variability is a plausible reason
+that time averaging helps the template classifier, but this is not isolated proof.
+
+A 37-sample (0.771 ms) test-window shift did not cause a consistent broad collapse
+in this particular diagnostic. This does not establish invariance to arbitrary
+onset/delay changes. Complete shifted results/confusions are saved on Kahan in
+`code/runs/phase_feature_diagnostic_v1/diagnostic.json` with the comparison PNG.
+
+Measured 5%-to-95% IR energy width: median 0.375 ms, 95th percentile 0.500 ms.
+Current STFT window/hop: 10.667/5.333 ms; temporal pooling region approximately
+21.333 ms. These scales motivate further inspection of transient features; phase
+can encode sub-window delays, so these numbers alone do not demonstrate loss.
+
+Next investigate which source families dominate the existing model's errors and
+test whether short-delay/phase descriptors improve those particular cases on
+validation data. Avoid claiming that phase has no useful structure, or that a
+shorter analysis window will necessarily improve localization.
