@@ -15,7 +15,7 @@ import numpy as np
 import torch
 
 from pinna import config, data, evaluate, model, report, train
-from pinna.phase_features import MODES
+from pinna.phase_features import MODES, TEMPORAL_MODES
 
 
 def distribution(err, output):
@@ -41,6 +41,8 @@ def main():
     p.add_argument("--output", type=Path, required=True, help="New output directory; existing directories are rejected")
     p.add_argument("--mode", choices=MODES, default="magnitude")
     p.add_argument("--head", choices=("classification", "regression"), default="classification")
+    p.add_argument("--baseline-checkpoint", type=Path, help="Required for temporal phase/control modes")
+    p.add_argument("--lr", type=float, default=2e-3)
     p.add_argument("--protocol", choices=("seen", "unseen_el", "unseen_az"), default="seen")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--steps", type=int, default=3000)
@@ -54,10 +56,19 @@ def main():
         p.error("steps, batch and eval-every must be positive; preroll nonnegative")
     if args.require_cuda and not torch.cuda.is_available():
         p.error("CUDA is unavailable; refusing an accidental CPU cluster run")
+    if args.lr <= 0:
+        p.error("lr must be positive")
+    if args.mode in TEMPORAL_MODES and (args.head != "classification" or args.baseline_checkpoint is None):
+        p.error("Temporal modes require --head classification and --baseline-checkpoint")
+    if args.baseline_checkpoint is not None and not args.baseline_checkpoint.is_file():
+        p.error("Baseline checkpoint does not exist")
+    if args.baseline_checkpoint is not None and args.mode not in TEMPORAL_MODES:
+        p.error("--baseline-checkpoint is only used by temporal modes")
     ir, az, el, sr = data.load_sofa(args.sofa)
     tr, te = data.split(args.protocol, az, el)
     cfg = train.TrainConfig(output_kind=args.head, feature_mode=args.mode, preroll=args.preroll, seed=args.seed,
-                            steps=args.steps, batch=args.batch, eval_every=args.eval_every)
+                            steps=args.steps, batch=args.batch, eval_every=args.eval_every, lr=args.lr,
+                            baseline_checkpoint=str(args.baseline_checkpoint) if args.baseline_checkpoint else None)
     args.output.mkdir(parents=True, exist_ok=False)
     root = Path(__file__).resolve().parents[1]
     def git(*cmd):
@@ -73,6 +84,8 @@ def main():
                 "cuda": torch.version.cuda, "device": str(config.DEVICE), "sofa_sha256": digest.hexdigest(),
                 "train_directions": tr.tolist(), "test_directions": te.tolist(),
                 "slurm_job_id": os.environ.get("SLURM_JOB_ID")}
+    if args.baseline_checkpoint:
+        metadata["baseline_sha256"] = hashlib.sha256(args.baseline_checkpoint.read_bytes()).hexdigest()
     (args.output / "environment.json").write_text(json.dumps(metadata, indent=2))
     packages = subprocess.run([sys.executable, "-m", "pip", "freeze"], capture_output=True, text=True)
     (args.output / "packages.txt").write_text(packages.stdout or packages.stderr)

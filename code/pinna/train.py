@@ -20,11 +20,12 @@ import torch
 from . import model as M
 from . import simulate
 from .config import DEVICE, SOURCE_TYPES
-from .phase_features import extract, feature_count
+from .phase_features import TEMPORAL_MODES, extract, feature_count
 
 
 @dataclass
 class TrainConfig:
+    baseline_checkpoint: str | None = None
     output_kind: str = "classification"
     feature_mode: str = "magnitude"
     preroll: int = 0  # 0 reproduces upstream; 4096 for matched streaming experiments
@@ -83,6 +84,8 @@ def _make_pool(ir, train_idx, cfg, gen, rng, chunk=256):
 def evaluate_set(model, X, dir_idx, V, V_cls, batch=4096):
     """Mean loss and great-circle errors of a model on precomputed features."""
     model.eval()
+    if isinstance(model, M.TemporalPhaseClassifier):
+        batch = min(batch, 128)
     losses, errs = [], []
     for i in range(0, len(X), batch):
         vt = V[torch.as_tensor(dir_idx[i:i + batch], device=DEVICE)]
@@ -102,15 +105,40 @@ def fit(ir, V, train_idx, cfg, val=None, log=print):
     gen = torch.Generator(device=DEVICE).manual_seed(1000 + cfg.seed)
     rng = np.random.default_rng(cfg.seed)
     V_cls = V[torch.as_tensor(train_idx, device=DEVICE)]
+    temporal = cfg.feature_mode in TEMPORAL_MODES
+    if temporal:
+        if not cfg.baseline_checkpoint or cfg.output_kind != "classification":
+            raise ValueError("Temporal modes require a magnitude baseline checkpoint and classification head")
+        baseline, ck = M.load(cfg.baseline_checkpoint, DEVICE)
+        if ck.get("feature_mode") != "magnitude" or not isinstance(baseline, M.DirectionMLP):
+            raise ValueError("Expected an original magnitude-only baseline checkpoint")
+        classes = ck.get("class_vectors")
+        if classes is None or classes.shape != V_cls.shape or not torch.allclose(classes.to(DEVICE), V_cls):
+            raise ValueError("Baseline training directions must match this protocol in the same order")
+        old_preroll = ck.get("info", {}).get("config", {}).get("preroll")
+        if old_preroll != cfg.preroll:
+            raise ValueError("Baseline and phase training must use the same preroll")
+        model = M.TemporalPhaseClassifier(baseline.config).to(DEVICE)
+        model.magnitude.load_state_dict(baseline.state_dict())
+    else:
+        model = M.DirectionMLP(feature_count(cfg.feature_mode), len(train_idx), cfg.hidden, cfg.depth,
+                               output_kind=cfg.output_kind).to(DEVICE)
     if val is None:
         val = make_validation_set(ir, train_idx, cfg)
     pool = _make_pool(ir, train_idx, cfg, gen, rng) if cfg.train_pool else None
 
-    model = M.DirectionMLP(feature_count(cfg.feature_mode), len(train_idx), cfg.hidden, cfg.depth,
-                           output_kind=cfg.output_kind).to(DEVICE)
-    opt = torch.optim.AdamW(model.parameters(), cfg.lr, weight_decay=cfg.weight_decay)
+    opt = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), cfg.lr,
+                            weight_decay=cfg.weight_decay)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, cfg.lr, total_steps=cfg.steps, pct_start=0.1)
     history, best, best_state, bad, run_loss, n_run = [], float("inf"), None, 0, 0.0, 0
+    if temporal:
+        v_loss, v_err = evaluate_set(model, val["x"], val["dir"], V, V_cls)
+        best = float(v_err.mean())
+        best_state = copy.deepcopy(model.state_dict())
+        history.append({"step": 0, "train_loss": None, "val_loss": v_loss,
+                        "val_err_mean": best, "val_err_median": float(np.median(v_err)),
+                        "lr": sched.get_last_lr()[0], "seconds": round(time.time() - t0, 1)})
+        log(f"baseline step 0  val loss {v_loss:.4f}  val error {best:.2f} deg")
     order, pos = None, 0
     for step in range(1, cfg.steps + 1):
         if pool is None:  # new examples
@@ -141,24 +169,31 @@ def fit(ir, V, train_idx, cfg, val=None, log=print):
                 rec["train_err_mean"] = float(evaluate_set(model, pool[0][:k], pool[1][:k], V_cls, V_cls)[1].mean())
             history.append(rec)
             run_loss, n_run = 0.0, 0
-            improved = v_loss < best - 1e-4
+            selection = rec["val_err_mean"] if temporal else v_loss
+            improved = selection < best - 1e-4
             if improved:
-                best, best_state, bad = v_loss, copy.deepcopy(model.state_dict()), 0
+                best, best_state, bad = selection, copy.deepcopy(model.state_dict()), 0
             else:
                 bad += 1
             log(f"step {step:5d}  train loss {rec['train_loss']:.4f}  val loss {v_loss:.4f}  "
                 f"val error {rec['val_err_mean']:5.2f} deg (median {rec['val_err_median']:.2f})"
                 f"{'  *best' if improved else ''}  {rec['seconds']:.0f} s")
             if bad >= cfg.patience:
-                log(f"early stop: no lower validation loss for {cfg.patience} evaluations")
+                log(f"early stop: no improvement in validation selection metric for {cfg.patience} evaluations")
                 break
     model.load_state_dict(best_state)
     model.eval()
-    best_rec = min(history, key=lambda r: r["val_loss"])
+    metric = "val_err_mean" if temporal else "val_loss"
+    # Match the 1e-4 improvement threshold used to retain actual weights.
+    best_rec = history[0]
+    for rec in history[1:]:
+        if rec[metric] < best_rec[metric] - 1e-4:
+            best_rec = rec
     info = {"best_step": best_rec["step"], "best_val_loss": best_rec["val_loss"],
             "best_val_err_mean": best_rec["val_err_mean"], "stopped_early": history[-1]["step"] < cfg.steps,
             "train_seconds": round(time.time() - t0, 1), "n_params": sum(p.numel() for p in model.parameters()),
-            "n_val": len(val["x"]), "config": asdict(cfg)}
+            "n_val": len(val["x"]), "config": asdict(cfg), "selection_metric": metric,
+            "trainable_params": sum(p.numel() for p in model.parameters() if p.requires_grad)}
     return model, history, info
 
 

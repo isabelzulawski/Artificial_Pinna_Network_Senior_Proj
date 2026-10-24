@@ -1,5 +1,7 @@
 # Phase experiments on Kahan
 
+For the second phase architecture, see [TEMPORAL_PHASE.md](TEMPORAL_PHASE.md).
+
 ## Continuous-direction baseline
 
 The runner now accepts `--head regression`. It preserves the magnitude features
@@ -26,8 +28,8 @@ git pull --ff-only
 
 Use `--protocol unseen_el` and `--protocol unseen_az` with distinct output names
 for the same held-out-direction diagnostics as the classifier. Existing results
-are preserved. A separate temporal phase branch is planned after this head ablation;
-it is not implemented by `--head regression`.
+are preserved. A temporal phase branch is documented in `TEMPORAL_PHASE.md`;
+it is not selected by `--head regression`.
 
 This branch adds a headless runner and optional features while leaving the upstream
 notebook's default magnitude model and zero-preroll training behavior intact.
