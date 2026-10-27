@@ -36,8 +36,11 @@ class DirectionMLP(nn.Module):
         self.body = nn.Sequential(*layers)
         self.head = nn.Linear(hidden, 3 if output_kind == "regression" else n_classes)
 
+    def forward_features(self, x):
+        return self.body(x)
+
     def forward(self, x):
-        out = self.head(self.body(x))
+        out = self.head(self.forward_features(x))
         return F.normalize(out, dim=-1) if self.output_kind == "regression" else out
 
 

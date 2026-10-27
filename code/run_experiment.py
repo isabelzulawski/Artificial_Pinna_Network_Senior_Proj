@@ -17,6 +17,7 @@ import torch
 from pinna import config, data, evaluate, model, report, train
 from pinna.phase_features import MODES, TEMPORAL_MODES
 from pinna.raw_phase import RAW_PHASE_MODES, reference_bin
+from pinna.training_losses import OBJECTIVES
 
 
 def distribution(err, output):
@@ -45,6 +46,10 @@ def main():
     p.add_argument("--head", choices=("classification", "regression"), default="classification")
     p.add_argument("--baseline-checkpoint", type=Path, help="Required for temporal phase/control modes")
     p.add_argument("--lr", type=float, default=2e-3)
+    p.add_argument('--training-objective', choices=OBJECTIVES, default='baseline')
+    p.add_argument('--select-by', choices=('loss', 'angular'), default='loss')
+    p.add_argument('--angular-weight', type=float, default=1.0)
+    p.add_argument('--contrastive-weight', type=float, default=.1)
     p.add_argument("--protocol", choices=("seen", "unseen_el", "unseen_az"), default="seen")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--steps", type=int, default=3000)
@@ -75,6 +80,8 @@ def main():
     tr, te = data.split(args.protocol, az, el)
     cfg = train.TrainConfig(output_kind=args.head, feature_mode=args.mode, preroll=args.preroll, seed=args.seed,
                             phase_reference_hz=args.phase_reference_hz,
+                            training_objective=args.training_objective, select_by=args.select_by,
+                            angular_weight=args.angular_weight, contrastive_weight=args.contrastive_weight,
                             steps=args.steps, batch=args.batch, eval_every=args.eval_every, lr=args.lr,
                             baseline_checkpoint=str(args.baseline_checkpoint) if args.baseline_checkpoint else None)
     args.output.mkdir(parents=True, exist_ok=False)

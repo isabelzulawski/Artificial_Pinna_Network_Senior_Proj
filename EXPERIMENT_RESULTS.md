@@ -184,3 +184,17 @@ a cumulative-error plot under `code/runs/spectral_comparison_v1/` on Kahan.
 Both distributions are from seed 0; the JSON separately reports three-seed averages.
 Thirteen local automated tests passed. Twelve tests passed on Kahan before the
 paired-SNR test was added, and the paired-SNR diagnostic then completed on GPU.
+
+## Raw phase with a reference-frequency sweep
+
+Completed October 26, 2026, code commit `9a64226038d742f1b594bc329db953599ecc15d1`.
+Full record: `RAW_REFERENCE_RESULTS.md`. All 16 tests passed on Kahan.
+
+A 383-input MLP (191 magnitude features + 192 raw relative phase angles)
+used a full-window Hann FFT. References 250, 500, 1000, 2000, 4000, and 8000 Hz
+were compared at seed 0; 8000 Hz was selected by validation mean angular error.
+Its three-seed test mean was **3.1008°**, versus the earlier magnitude MLP's
+**2.6938°**. At seed 0, raw phase scored 3.278°; the same-width zero-phase
+control scored 2.700°; matched-reference sine/cosine scored 3.328°.
+This raw-phase/reference design did not improve the magnitude baseline.
+Results remain synthetic seen-direction development benchmarks.
