@@ -25,6 +25,7 @@ def main():
                        '--mode', 'magnitude', '--training-objective', objective, '--select-by', 'angular',
                        '--contrastive-weight', '.1', '--angular-weight', '1.0',
                        '--steps', str(a.steps), '--batch', '256', '--eval-every', '250',
+                       '--patience', str(a.steps//250+2),
                        '--preroll', '4096', '--seed', str(seed), '--protocol', 'seen', '--require-cuda']
             print(f'START {objective} seed={seed}', flush=True)
             with (a.output/f'{directory.name}.log').open('w') as log:

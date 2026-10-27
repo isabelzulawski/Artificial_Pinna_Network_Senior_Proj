@@ -14,6 +14,8 @@ classification head, 277750 parameters, original local decoder and preprocessing
 There is no projection head or extra inference step. Losses operate only during
 training. Every condition uses batch 256, 3000 optimizer steps, the same sources,
 training SNR range, preroll, optimizer and learning-rate schedule.
+Early stopping is disabled for these comparison runs by setting patience above
+the number of validation checks; checkpoints still use the best validation error.
 
 The paired control separates a change in batch sampling from the contrastive
 objective itself. Same-direction sounds are positives. Different directions at

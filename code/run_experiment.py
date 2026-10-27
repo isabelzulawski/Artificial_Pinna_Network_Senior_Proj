@@ -55,6 +55,7 @@ def main():
     p.add_argument("--steps", type=int, default=3000)
     p.add_argument("--batch", type=int, default=256)
     p.add_argument("--eval-every", type=int, default=250)
+    p.add_argument('--patience', type=int, default=4)
     p.add_argument("--preroll", type=int, default=4096, help="0 = original training recipe; 4096 = streaming warmup")
     p.add_argument("--full-battery", action="store_true", help="Default tests core conditions only")
     p.add_argument("--require-cuda", action="store_true")
@@ -64,8 +65,8 @@ def main():
             _, actual_reference_hz = reference_bin(args.phase_reference_hz, config.WINDOW)
         except ValueError as exc:
             p.error(str(exc))
-    if min(args.steps, args.batch, args.eval_every) < 1 or args.preroll < 0:
-        p.error("steps, batch and eval-every must be positive; preroll nonnegative")
+    if min(args.steps, args.batch, args.eval_every, args.patience) < 1 or args.preroll < 0:
+        p.error("steps, batch, eval-every and patience must be positive; preroll nonnegative")
     if args.require_cuda and not torch.cuda.is_available():
         p.error("CUDA is unavailable; refusing an accidental CPU cluster run")
     if args.lr <= 0:
@@ -82,7 +83,7 @@ def main():
                             phase_reference_hz=args.phase_reference_hz,
                             training_objective=args.training_objective, select_by=args.select_by,
                             angular_weight=args.angular_weight, contrastive_weight=args.contrastive_weight,
-                            steps=args.steps, batch=args.batch, eval_every=args.eval_every, lr=args.lr,
+                            steps=args.steps, batch=args.batch, eval_every=args.eval_every, patience=args.patience, lr=args.lr,
                             baseline_checkpoint=str(args.baseline_checkpoint) if args.baseline_checkpoint else None)
     args.output.mkdir(parents=True, exist_ok=False)
     root = Path(__file__).resolve().parents[1]
