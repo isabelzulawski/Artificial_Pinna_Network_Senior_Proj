@@ -354,7 +354,7 @@ def run_battery(predict, protocol, ir, az, el, train_idx, test_idx, sr=SR, quick
         out["conditions"][cond.name] = {"group": cond.group, "x": cond.x}
         out["metrics"][cond.name] = m
         out["examples"][cond.name] = {"err": errors(v, tidx, az, el).astype(np.float32), "true_idx": tidx,
-                                      "source": src, "conf": cf}
+                                      "source": src, "conf": cf, "pred_vec": v}
         log(f"{cond.name:22s} n={len(tidx):5d}  mean {m['gc_mean']:6.2f} deg  median {m['gc_median']:5.2f}  "
             f"< 5 deg {m['pct_lt5']:5.1f} %  {time.time() - t0:4.0f} s")
     return out

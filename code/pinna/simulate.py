@@ -134,16 +134,19 @@ def source(kind, B, n, sr, gen):
 
 # ---------------------------------------------------------------- training and validation examples
 @torch.no_grad()
-def make_batch(ir, idx, kinds, gen, snr_db, n=WINDOW, sr=SR):
+def make_batch(ir, idx, kinds, gen, snr_db, n=WINDOW, sr=SR, preroll=0):
     """Microphone signals (B, n) for directions idx (indices into ir) and one source type per example.
-    snr_db: a number, or (lo, hi) for a uniform draw per example. The source starts at the first sample."""
+    snr_db: a number, or (lo, hi) for a uniform draw per example. With preroll=0 the source starts at the first sample; otherwise discard
+    preroll samples after convolution before normalization/noise."""
+    if preroll < 0:
+        raise ValueError("preroll must be nonnegative")
     B = len(idx)
     kinds = np.asarray(kinds)
-    x = torch.empty(B, n, device=DEVICE)
+    x = torch.empty(B, n + preroll, device=DEVICE)
     for k in np.unique(kinds):
         m = np.where(kinds == k)[0]
-        x[torch.as_tensor(m, device=DEVICE)] = source(k, len(m), n, sr, gen)
-    y = normalize(convolve(x, torch.as_tensor(ir[idx], device=DEVICE)))
+        x[torch.as_tensor(m, device=DEVICE)] = source(k, len(m), n + preroll, sr, gen)
+    y = normalize(convolve(x, torch.as_tensor(ir[idx], device=DEVICE))[:, preroll:])
     y = y * 10 ** (uniform(gen, -3, 3, B) / 20)
     snr = torch.full((B, 1), float(snr_db), device=DEVICE) if np.isscalar(snr_db) else uniform(gen, *snr_db, B)
     return add_noise(y, randn(gen, B, n), snr)
