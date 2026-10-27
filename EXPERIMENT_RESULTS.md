@@ -198,3 +198,16 @@ Its three-seed test mean was **3.1008°**, versus the earlier magnitude MLP's
 control scored 2.700°; matched-reference sine/cosine scored 3.328°.
 This raw-phase/reference design did not improve the magnitude baseline.
 Results remain synthetic seen-direction development benchmarks.
+
+## Same-size training-objective comparison
+
+User-supplied completion log for `code/runs/training_objectives_v1`, commit
+`7daa7527bb13a107434520cd05cfc22412564229`. All twelve GPU runs completed.
+Three-seed test means: fresh baseline **2.7010°**, paired-source control
+**2.7854°**, source contrastive **2.7529°**, angular cost **2.6459°**.
+Every model has 277750 parameters and the same inference code. Fresh baseline
+and alternatives use validation-angular checkpoint selection and fixed training
+budgets. Angular cost reduced test mean by about 2% in aggregate and improved
+all three test seeds, but validation did not consistently favor it; this is a
+small exploratory gain. Contrastive training did not beat the ordinary baseline.
+See `TRAINING_OBJECTIVE_RESULTS.md` for scope and limitations.

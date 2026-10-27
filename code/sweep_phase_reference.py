@@ -1,5 +1,6 @@
 """Coarse reference-frequency sweep, choosing by validation rather than test error."""
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -14,7 +15,22 @@ def main():
     p.add_argument('--output', required=True, type=Path)
     p.add_argument('--frequencies', nargs='+', type=float, default=[250, 500, 1000, 2000, 4000, 8000])
     p.add_argument('--steps', type=int, default=3000)
+    p.add_argument('--previous-sweep', type=Path, help='Reuse completed seed-0 candidates from a prior sweep')
+    p.add_argument('--screen-only', action='store_true', help='Run candidates only, without controls or extra seeds')
     a = p.parse_args()
+    previous = []
+    if a.previous_sweep:
+        old = json.loads((a.previous_sweep/'summary.json').read_text())
+        previous = old['candidates']
+        digest = hashlib.sha256(a.sofa.read_bytes()).hexdigest()
+        for row in previous:
+            env = json.loads((a.previous_sweep/Path(row['path']).name/'environment.json').read_text())
+            expected = dict(mode='raw_phase', seed=0, steps=a.steps, batch=256,
+                            eval_every=250, protocol='seen', preroll=4096, head='classification', lr=.002)
+            if env['sofa_sha256'] != digest or any(env['args'].get(k) != v for k,v in expected.items()):
+                p.error('Prior candidates must use the same SOFA and training/evaluation settings')
+            if env['args'].get('select_by', 'loss') != 'loss':
+                p.error('Prior candidates must use validation-loss checkpoint selection')
     a.output.mkdir(parents=True, exist_ok=False)
     script = Path(__file__).with_name('run_experiment.py')
     records = []
@@ -41,13 +57,23 @@ def main():
         return record
 
     # Lock frequency selection before confirmation seeds or encoding comparison.
-    candidates = [run('raw_phase', hz, 0) for hz in a.frequencies]
+    existing = {row['requested_reference_hz'] for row in previous}
+    candidates = previous + [run('raw_phase', hz, 0) for hz in dict.fromkeys(a.frequencies) if hz not in existing]
     best = min(candidates, key=lambda r: r['val_mean'])
     hz = best['requested_reference_hz']
     selection = dict(selected_reference_hz=hz, criterion='seed-0 validation mean angular error',
-                     frequencies_tested=a.frequencies, candidates=candidates)
+                     frequencies_tested=[r['requested_reference_hz'] for r in candidates], candidates=candidates)
     (a.output/'selection.json').write_text(json.dumps(selection, indent=2)+'\n')
     print(f'SELECTED {hz:g} Hz by validation only', flush=True)
+    if a.screen_only:
+        selection.update(records=records, previous_sweep=str(a.previous_sweep) if a.previous_sweep else None,
+                         note='Exploratory seed-0 screening only; no new controls or confirmation seeds.')
+        (a.output/'summary.json').write_text(json.dumps(selection, indent=2)+'\n')
+        for row in sorted(candidates, key=lambda r: r['requested_reference_hz']):
+            print(f"REFERENCE {row['requested_reference_hz']:g}Hz validation={row['val_mean']:.3f} "
+                  f"test={row['test_mean']:.3f}", flush=True)
+        print(f'COMPLETE screening: selected={hz:g}Hz across {len(candidates)} references', flush=True)
+        return
     run('raw_phase_zero', hz, 0)
     for seed in (1, 2):
         run('raw_phase', hz, seed)

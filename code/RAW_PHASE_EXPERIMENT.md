@@ -51,3 +51,21 @@ This finds the leading candidate in a small, exploratory sweep, not an optimal
 reference for all sounds/directions. Validation uses familiar directions and
 synthetic source families. Held-out-direction and real-recording validation
 remain separate work. Original magnitude baseline runs are unchanged.
+
+## Extend the completed sweep to higher references
+
+After other GPU jobs finish, run only three additional seed-0 candidates while
+retaining the six previous candidates for a combined nine-frequency comparison:
+
+```sh
+python -u code/sweep_phase_reference.py \
+  --sofa 'data/ArtificialPinnaB2_v2 1.sofa' \
+  --previous-sweep code/runs/raw_reference_sweep_v2 \
+  --frequencies 12000 16000 20000 --screen-only \
+  --output code/runs/raw_reference_extension_v1
+```
+
+The script checks the prior SOFA hash and core training settings. It writes a
+new summary and selection without modifying the original sweep. This extension
+only screens the three new candidates; it does not repeat controls or seeds.
+If a new reference wins validation, its confirmation remains a separate step.
