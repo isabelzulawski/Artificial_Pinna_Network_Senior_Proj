@@ -28,6 +28,7 @@ class TrainConfig:
     baseline_checkpoint: str | None = None
     output_kind: str = "classification"
     feature_mode: str = "magnitude"
+    phase_reference_hz: float = 1000.0
     preroll: int = 0  # 0 reproduces upstream; 4096 for matched streaming experiments
     seed: int = 0
     steps: int = 3000  # maximum number of optimizer steps
@@ -47,14 +48,14 @@ class TrainConfig:
 
 
 def _feature_set(ir, dir_idx, kinds_per_dir, draws, gen, snr_db, chunk=256,
-                 feature_mode="magnitude", preroll=0):
+                 feature_mode="magnitude", preroll=0, phase_reference_hz=1000.0):
     """Features, true direction index and source label for every (source type, draw, direction)."""
     X, T, K = [], [], []
     for kind in kinds_per_dir:
         for _ in range(draws):
             for ch in np.array_split(dir_idx, max(1, len(dir_idx) // chunk)):
                 X.append(extract(simulate.make_batch(ir, ch, [kind] * len(ch), gen, snr_db,
-                                                    preroll=preroll), feature_mode))
+                                                    preroll=preroll), feature_mode, phase_reference_hz))
                 T.append(ch)
                 K.append(np.full(len(ch), kind))
     return torch.cat(X), np.concatenate(T), np.concatenate(K)
@@ -65,7 +66,8 @@ def make_validation_set(ir, train_idx, cfg):
     """Fixed validation features at the training directions: every training source type, val_draws each."""
     gen = torch.Generator().manual_seed(cfg.val_seed)
     X, T, K = _feature_set(ir, train_idx, cfg.sources, cfg.val_draws, gen, cfg.snr_db,
-                            feature_mode=cfg.feature_mode, preroll=cfg.preroll)
+                            feature_mode=cfg.feature_mode, preroll=cfg.preroll,
+                            phase_reference_hz=cfg.phase_reference_hz)
     return {"x": X, "dir": T, "source": K}
 
 
@@ -75,7 +77,7 @@ def _make_pool(ir, train_idx, cfg, gen, rng, chunk=256):
     pick = rng.choice(len(train_idx), cfg.train_pool)
     kinds = rng.choice(list(cfg.sources), cfg.train_pool)
     X = torch.cat([extract(simulate.make_batch(ir, train_idx[pick[i:i + chunk]], kinds[i:i + chunk], gen,
-                                                   cfg.snr_db, preroll=cfg.preroll), cfg.feature_mode)
+                                                   cfg.snr_db, preroll=cfg.preroll), cfg.feature_mode, cfg.phase_reference_hz)
                    for i in range(0, cfg.train_pool, chunk)])
     return X, pick
 
@@ -148,7 +150,7 @@ def fit(ir, V, train_idx, cfg, val=None, log=print):
         if pool is None:  # new examples
             b = rng.choice(len(train_idx), cfg.batch)
             x = extract(simulate.make_batch(ir, train_idx[b], rng.choice(list(cfg.sources), cfg.batch), gen,
-                                             cfg.snr_db, preroll=cfg.preroll), cfg.feature_mode)
+                                             cfg.snr_db, preroll=cfg.preroll), cfg.feature_mode, cfg.phase_reference_hz)
         else:  # the fixed set, reshuffled every pass
             if order is None or pos + cfg.batch > len(order):
                 order, pos = rng.permutation(cfg.train_pool), 0
@@ -201,9 +203,9 @@ def fit(ir, V, train_idx, cfg, val=None, log=print):
     return model, history, info
 
 
-def predictor(model, V_cls, feature_mode="magnitude"):
+def predictor(model, V_cls, feature_mode="magnitude", phase_reference_hz=1000.0):
     """Wrap a trained model as predict(waves (B, n)) -> (unit vectors (B, 3), confidence (B,))."""
     @torch.no_grad()
     def predict(w):
-        return M.direction_prediction(model, model(extract(w, feature_mode)), V_cls)
+        return M.direction_prediction(model, model(extract(w, feature_mode, phase_reference_hz)), V_cls)
     return predict

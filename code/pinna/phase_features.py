@@ -9,11 +9,12 @@ import torch.nn.functional as F
 
 from .features import BAND, HOP, NFFT, N_FEATURES, features
 from .spectral_features import N_SPECTRAL, SPECTRAL_MODES, spectral_features
+from .raw_phase import N_PHASE, RAW_PHASE_MODES, phase_values
 
 TEMPORAL_FRAMES = 64
 TEMPORAL_CHANNELS = 4
 TEMPORAL_MODES = ("temporal_phase", "temporal_zero")
-MODES = ("magnitude", "phase", "phase_zero", *TEMPORAL_MODES, *SPECTRAL_MODES)
+MODES = ("magnitude", "phase", "phase_zero", *TEMPORAL_MODES, *SPECTRAL_MODES, *RAW_PHASE_MODES)
 
 
 def feature_count(mode):
@@ -23,6 +24,8 @@ def feature_count(mode):
         return N_SPECTRAL
     if mode in TEMPORAL_MODES:
         return N_FEATURES + TEMPORAL_CHANNELS * N_FEATURES * TEMPORAL_FRAMES
+    if mode in RAW_PHASE_MODES:
+        return N_FEATURES + N_PHASE * (2 if mode == "raw_phase_sincos" else 1)
     return N_FEATURES if mode == "magnitude" else 3 * N_FEATURES
 
 
@@ -54,7 +57,7 @@ def temporal_phase(s):
     return torch.stack(channels, dim=1)
 
 
-def extract(w, mode="magnitude"):
+def extract(w, mode="magnitude", phase_reference_hz=1000.0):
     """(B, samples) -> (B, 191) or (B, 573), for real 48-kHz audio.
 
     phase_zero matches phase model capacity with zeroed phase inputs. Weighting
@@ -67,6 +70,8 @@ def extract(w, mode="magnitude"):
     mag = features(w)
     if mode == "magnitude":
         return mag
+    if mode in RAW_PHASE_MODES:
+        return torch.cat((mag, phase_values(w, mode, phase_reference_hz)), -1)
     if mode == "phase_zero":
         return torch.cat((mag, torch.zeros_like(mag), torch.zeros_like(mag)), -1)
     if mode == "temporal_zero":
