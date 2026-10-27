@@ -10,11 +10,12 @@ import torch.nn.functional as F
 from .features import BAND, HOP, NFFT, N_FEATURES, features
 from .spectral_features import N_SPECTRAL, SPECTRAL_MODES, spectral_features
 from .raw_phase import N_PHASE, RAW_PHASE_MODES, phase_values
+from .mlp_mel_phase import MLP_MEL_MODES, N_MLP_MEL_PHASE, mlp_mel_phase
 
 TEMPORAL_FRAMES = 64
 TEMPORAL_CHANNELS = 4
 TEMPORAL_MODES = ("temporal_phase", "temporal_zero")
-MODES = ("magnitude", "phase", "phase_zero", *TEMPORAL_MODES, *SPECTRAL_MODES, *RAW_PHASE_MODES)
+MODES = ("magnitude", "phase", "phase_zero", *TEMPORAL_MODES, *SPECTRAL_MODES, *RAW_PHASE_MODES, *MLP_MEL_MODES)
 
 
 def feature_count(mode):
@@ -26,6 +27,8 @@ def feature_count(mode):
         return N_FEATURES + TEMPORAL_CHANNELS * N_FEATURES * TEMPORAL_FRAMES
     if mode in RAW_PHASE_MODES:
         return N_FEATURES + N_PHASE * (2 if mode == "raw_phase_sincos" else 1)
+    if mode in MLP_MEL_MODES:
+        return N_FEATURES + N_MLP_MEL_PHASE
     return N_FEATURES if mode == "magnitude" else 3 * N_FEATURES
 
 
@@ -70,6 +73,8 @@ def extract(w, mode="magnitude", phase_reference_hz=1000.0):
     mag = features(w)
     if mode == "magnitude":
         return mag
+    if mode in MLP_MEL_MODES:
+        return torch.cat((mag, mlp_mel_phase(w, mode)), -1)
     if mode in RAW_PHASE_MODES:
         return torch.cat((mag, phase_values(w, mode, phase_reference_hz)), -1)
     if mode == "phase_zero":

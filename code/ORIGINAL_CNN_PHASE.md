@@ -1,5 +1,9 @@
 # Earlier PinnaResNet phase-channel experiment
 
+For the phase representation adapted to the lightweight MLP, use
+`MLP_MEL_PHASE.md` and `compare_mlp_mel_phase.py`. This document describes the
+separate, larger CNN diagnostic only.
+
 Purpose: determine whether explicitly supplying the earlier notebook's phase
 channels helps its CNN, before attempting a lightweight adaptation.
 

@@ -46,6 +46,7 @@ def main():
     p.add_argument("--head", choices=("classification", "regression"), default="classification")
     p.add_argument("--baseline-checkpoint", type=Path, help="Required for temporal phase/control modes")
     p.add_argument("--lr", type=float, default=2e-3)
+    p.add_argument('--hidden', type=int, default=256)
     p.add_argument('--training-objective', choices=OBJECTIVES, default='baseline')
     p.add_argument('--select-by', choices=('loss', 'angular'), default='loss')
     p.add_argument('--angular-weight', type=float, default=1.0)
@@ -65,8 +66,8 @@ def main():
             _, actual_reference_hz = reference_bin(args.phase_reference_hz, config.WINDOW)
         except ValueError as exc:
             p.error(str(exc))
-    if min(args.steps, args.batch, args.eval_every, args.patience) < 1 or args.preroll < 0:
-        p.error("steps, batch, eval-every and patience must be positive; preroll nonnegative")
+    if min(args.steps, args.batch, args.eval_every, args.patience, args.hidden) < 1 or args.preroll < 0:
+        p.error("steps, batch, eval-every, patience and hidden must be positive; preroll nonnegative")
     if args.require_cuda and not torch.cuda.is_available():
         p.error("CUDA is unavailable; refusing an accidental CPU cluster run")
     if args.lr <= 0:
@@ -80,6 +81,7 @@ def main():
     ir, az, el, sr = data.load_sofa(args.sofa)
     tr, te = data.split(args.protocol, az, el)
     cfg = train.TrainConfig(output_kind=args.head, feature_mode=args.mode, preroll=args.preroll, seed=args.seed,
+                            hidden=args.hidden,
                             phase_reference_hz=args.phase_reference_hz,
                             training_objective=args.training_objective, select_by=args.select_by,
                             angular_weight=args.angular_weight, contrastive_weight=args.contrastive_weight,

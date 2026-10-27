@@ -36,16 +36,21 @@ _BANK = mel_bank()
 _CACHE = {}
 
 
-def original_features(w, include_phase=True):
+def complex_mel(w):
     w = w.float()
     if w.device not in _CACHE:
         _CACHE[w.device] = (torch.hann_window(NFFT, device=w.device),
                            torch.as_tensor(_BANK, device=w.device).to(torch.complex64),
                            torch.arange(-4, 5, device=w.device, dtype=torch.float32).reshape(1, 1, 9)/60)
-    window, bank, derivative = _CACHE[w.device]
+    window, bank, _ = _CACHE[w.device]
     spectrum = torch.stft(w, NFFT, HOP, NFFT, window, center=True,
                           pad_mode='reflect', return_complex=True)
-    mel = bank @ spectrum
+    return bank @ spectrum
+
+
+def original_features(w, include_phase=True):
+    mel = complex_mel(w)
+    derivative = _CACHE[w.device][2]
     logmel = torch.log10(mel.abs() + 1e-10)
     delta = F.conv1d(F.pad(logmel.reshape(-1, 1, logmel.shape[-1]), (4, 4), mode='replicate'), derivative)
     delta = delta.reshape_as(logmel)
