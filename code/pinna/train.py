@@ -119,8 +119,8 @@ def fit(ir, V, train_idx, cfg, val=None, log=print, checkpoint=None, resume=Fals
             raise ValueError('Training-only ablations require online magnitude MLP classification')
         if paired and (cfg.batch % 2 or len(cfg.sources) < 2):
             raise ValueError('Paired training requires even batch and at least two source families')
-    if checkpoint is not None and (cfg.feature_mode != 'magnitude' or cfg.output_kind != 'classification' or cfg.train_pool):
-        raise ValueError('Resume checkpoints currently support online magnitude classification only')
+    if checkpoint is not None and (cfg.feature_mode in TEMPORAL_MODES or cfg.feature_mode == 'spectral_cnn' or cfg.output_kind != 'classification' or cfg.train_pool):
+        raise ValueError('Resume checkpoints support online MLP classification only')
     if resume and (checkpoint is None or not Path(checkpoint).is_file()):
         raise ValueError('Resume requires an existing training checkpoint')
     t0 = time.time()
