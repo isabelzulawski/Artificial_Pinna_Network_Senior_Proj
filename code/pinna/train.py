@@ -11,6 +11,8 @@ step the model cannot memorize examples, so the validation loss usually keeps fa
 schedule ends; with a fixed train_pool it overfits, and early stopping matters.
 """
 import copy
+import os
+from pathlib import Path
 import time
 from dataclasses import asdict, dataclass
 
@@ -104,7 +106,7 @@ def evaluate_set(model, X, dir_idx, V, V_cls, batch=4096):
     return sum(losses) / len(X), e
 
 
-def fit(ir, V, train_idx, cfg, val=None, log=print):
+def fit(ir, V, train_idx, cfg, val=None, log=print, checkpoint=None, resume=False):
     """Train a DirectionMLP. V: unit vectors of every grid direction (D_all, 3) on DEVICE; train_idx: the
     training directions (the model's classes). Returns (model with the best validation weights, history, info)."""
     if cfg.training_objective not in OBJECTIVES or cfg.select_by not in ('loss', 'angular'):
@@ -117,7 +119,12 @@ def fit(ir, V, train_idx, cfg, val=None, log=print):
             raise ValueError('Training-only ablations require online magnitude MLP classification')
         if paired and (cfg.batch % 2 or len(cfg.sources) < 2):
             raise ValueError('Paired training requires even batch and at least two source families')
+    if checkpoint is not None and (cfg.feature_mode != 'magnitude' or cfg.output_kind != 'classification' or cfg.train_pool):
+        raise ValueError('Resume checkpoints currently support online magnitude classification only')
+    if resume and (checkpoint is None or not Path(checkpoint).is_file()):
+        raise ValueError('Resume requires an existing training checkpoint')
     t0 = time.time()
+    elapsed = 0.0
     torch.manual_seed(cfg.seed)
     gen = torch.Generator(device=DEVICE).manual_seed(1000 + cfg.seed)
     rng = np.random.default_rng(cfg.seed)
@@ -159,10 +166,28 @@ def fit(ir, V, train_idx, cfg, val=None, log=print):
         best_state = copy.deepcopy(model.state_dict())
         history.append({"step": 0, "train_loss": None, "val_loss": v_loss,
                         "val_err_mean": best, "val_err_median": float(np.median(v_err)),
-                        "lr": sched.get_last_lr()[0], "seconds": round(time.time() - t0, 1)})
+                        "lr": sched.get_last_lr()[0], "seconds": round(elapsed + time.time() - t0, 1)})
         log(f"baseline step 0  val loss {v_loss:.4f}  val error {best:.2f} deg")
     order, pos = None, 0
-    for step in range(1, cfg.steps + 1):
+    start_step = 0
+    if resume:
+        ck = torch.load(checkpoint, map_location=DEVICE, weights_only=False)
+        if ck['config'] != asdict(cfg) or not np.array_equal(ck['train_idx'], train_idx):
+            raise ValueError('Resume config/directions differ; do not change the OneCycle horizon')
+        if not torch.equal(ck['vectors'].cpu(), V.cpu()):
+            raise ValueError('Resume direction vectors differ')
+        model.load_state_dict(ck['state_dict'])
+        opt.load_state_dict(ck['optimizer'])
+        sched.load_state_dict(ck['scheduler'])
+        gen.set_state(ck['generator'].cpu())
+        rng.bit_generator.state = ck['numpy_rng']
+        torch.set_rng_state(ck['torch_rng'].cpu())
+        if DEVICE.type == 'cuda':
+            torch.cuda.set_rng_state_all([v.cpu() for v in ck['cuda_rng']])
+        history, best, best_state, bad = ck['history'], ck['best'], ck['best_state'], ck['bad']
+        start_step, elapsed = ck['step'], ck['elapsed']
+        log(f'Resuming step {start_step}/{cfg.steps} with optimizer, scheduler and random states')
+    for step in range(start_step + 1, cfg.steps + 1):
         if pool is None:  # new examples
             if paired:
                 b, kinds = paired_recipe(rng, len(train_idx), cfg.sources, cfg.batch)
@@ -199,7 +224,7 @@ def fit(ir, V, train_idx, cfg, val=None, log=print):
             v_loss, v_err = evaluate_set(model, val["x"], val["dir"], V, V_cls)
             rec = {"step": step, "train_loss": run_loss / n_run, "val_loss": v_loss,
                    "val_err_mean": float(v_err.mean()), "val_err_median": float(np.median(v_err)),
-                   "lr": sched.get_last_lr()[0], "seconds": round(time.time() - t0, 1)}
+                   "lr": sched.get_last_lr()[0], "seconds": round(elapsed + time.time() - t0, 1)}
             if pool is not None:  # error on (part of) the training set itself, to show memorization
                 k = min(cfg.train_pool, len(val["x"]))
                 rec["train_err_mean"] = float(evaluate_set(model, pool[0][:k], pool[1][:k], V_cls, V_cls)[1].mean())
@@ -214,6 +239,17 @@ def fit(ir, V, train_idx, cfg, val=None, log=print):
             log(f"step {step:5d}  train loss {rec['train_loss']:.4f}  val loss {v_loss:.4f}  "
                 f"val error {rec['val_err_mean']:5.2f} deg (median {rec['val_err_median']:.2f})"
                 f"{'  *best' if improved else ''}  {rec['seconds']:.0f} s")
+            if checkpoint is not None:
+                path = Path(checkpoint)
+                state = dict(config=asdict(cfg), train_idx=np.asarray(train_idx), vectors=V.cpu(),
+                             state_dict=model.state_dict(), optimizer=opt.state_dict(), scheduler=sched.state_dict(),
+                             generator=gen.get_state(), numpy_rng=rng.bit_generator.state,
+                             torch_rng=torch.get_rng_state(),
+                             cuda_rng=torch.cuda.get_rng_state_all() if DEVICE.type == 'cuda' else [],
+                             history=history, best=best, best_state=best_state, bad=bad, step=step,
+                             elapsed=elapsed + time.time() - t0)
+                torch.save(state, str(path) + '.tmp')
+                os.replace(str(path) + '.tmp', path)
             if bad >= cfg.patience:
                 log(f"early stop: no improvement in validation selection metric for {cfg.patience} evaluations")
                 break
@@ -227,7 +263,7 @@ def fit(ir, V, train_idx, cfg, val=None, log=print):
             best_rec = rec
     info = {"best_step": best_rec["step"], "best_val_loss": best_rec["val_loss"],
             "best_val_err_mean": best_rec["val_err_mean"], "stopped_early": history[-1]["step"] < cfg.steps,
-            "train_seconds": round(time.time() - t0, 1), "n_params": sum(p.numel() for p in model.parameters()),
+            "train_seconds": round(elapsed + time.time() - t0, 1), "n_params": sum(p.numel() for p in model.parameters()),
             "n_val": len(val["x"]), "config": asdict(cfg), "selection_metric": metric,
             "trainable_params": sum(p.numel() for p in model.parameters() if p.requires_grad)}
     return model, history, info

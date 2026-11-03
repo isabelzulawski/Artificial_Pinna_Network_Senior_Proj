@@ -152,3 +152,10 @@ training run must be restarted, and the checkpoint is written after fitting fini
 Kahan-specific settings follow the supplied July 2026 guide: `/zooper2/$USER`,
 Slurm, and `gpu24`. Shell variables do not expand in `#SBATCH` directives;
 the log path uses Slurm's `%u` and `%j` substitutions instead.
+
+## Magnitude MLP scaling
+
+For the validation-selected width/training-budget sweep, serial Slurm submission,
+checkpoint recovery, and result tables, see [MLP_SCALING.md](MLP_SCALING.md).
+The dedicated sweep supports interrupted-training resume; the older
+`run_experiment.py` command above still does not expose resume.
