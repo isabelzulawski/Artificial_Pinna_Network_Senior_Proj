@@ -155,12 +155,16 @@ def main():
     names = ['magnitude','raw','reference_1k','scaled_unwrapped','delay_detrended','phase_curvature']
     for name in names:
         x = np.array(mags) if name == 'magnitude' else vectors(np.stack([r[name] for r in arrays]))
+        raw_x = x
         fit = draw < a.draws//2; score = ~fit
         mean = x[fit].mean(0); scale = x[fit].std(0).clip(.05)
         x = (x-mean)/scale  # calibration fitted only on template-training partition
         held = {}
         for kind in config.SOURCE_TYPES:
-            held[kind] = template_accuracy(x,y,family != kind,family == kind)
+            family_fit = family != kind
+            # Refit all preprocessing without the held-out family as well.
+            hx = (raw_x-raw_x[family_fit].mean(0))/raw_x[family_fit].std(0).clip(.05)
+            held[kind] = template_accuracy(hx,y,family_fit,family == kind)
         group = np.stack([x[fit & (y==k)].mean(0) for k in range(len(idx))])
         within = ((x[fit]-group[y[fit]])**2).mean()
         between = group.var(0).mean()
@@ -193,6 +197,26 @@ def main():
         axes[1].plot(FREQS/1000,wrap(delayed[name]-original[name])/np.pi,label=name)
     axes[1].set(title='Exact 37-sample delay: phase change',xlabel='Frequency (kHz)',ylabel='Wrapped difference / pi'); axes[1].legend(fontsize=8)
     fig.tight_layout(); fig.savefig(a.output/'06_branch_and_delay.png',dpi=170); plt.close(fig)
+    # Real recording-window shift: overlapping crops of one continuous noisy stream.
+    gen = torch.Generator().manual_seed(194001)
+    source = simulate.source('white',1,n+4096+37,sr,gen).repeat(len(idx),1)
+    clean = simulate.normalize(simulate.convolve(source,torch.as_tensor(ir[idx],device=config.DEVICE))[:,4096:])
+    stream = simulate.add_noise(clean,simulate.randn(gen,*clean.shape),30.)
+    before_z = np.fft.rfft(stream[:,:n].cpu().numpy()*np.hanning(n),axis=-1)
+    after_z = np.fft.rfft(stream[:,37:].cpu().numpy()*np.hanning(n),axis=-1)
+    crop_change = {name:[] for name in names if name != 'magnitude'}
+    for za,zb in zip(before_z,after_z):
+        va,_=phase_views(za,f); vb,_=phase_views(zb,f)
+        for name in crop_change:
+            change=wrap(va[name]-vb[name])
+            finite=np.isfinite(change)
+            if finite.any(): crop_change[name].append(float(np.sqrt(np.mean(change[finite]**2))))
+    crop_change={k:float(np.mean(v)) if v else None for k,v in crop_change.items()}
+    fig,ax=plt.subplots(figsize=(10,4))
+    ax.bar(range(len(crop_change)),list(crop_change.values()),color='#305C82')
+    ax.set(xticks=range(len(crop_change)),xticklabels=[x.replace('_','\n') for x in crop_change],
+           ylabel='Circular RMS phase change (radians)',title='Actual 37-sample analysis-window shift: same continuous white-noise recording')
+    fig.tight_layout(); fig.savefig(a.output/'07_actual_window_shift.png',dpi=170); plt.close(fig)
     # Small actual-generator duplicate check. This does not prove all historical draws distinct.
     fingerprints = {}
     for name, seed, snr in [('training_sample',1000,(10.,40.)),('validation_sample',90004,(10.,40.)),('core_test_sample',777,30.)]:
@@ -206,6 +230,7 @@ def main():
                   examples=len(y),chance_pct=100/len(idx),actual_reference_hz=float(f[np.argmin(abs(f-1000))]),
                   diagnostic_only=True,neural_training_performed=False,diagnostics=diagnostics,
                   exact_delay_rms_radians=sensitivity,scaled_branch_rms_radians=float(np.sqrt(np.nanmean(branch**2))),
+                  actual_window_shift_rms_radians=crop_change,
                   reference_snr={k:dict(median_db=float(np.median(rs[family==k])),fraction_below_0db=float((rs[family==k]<0).mean())) for k in config.SOURCE_TYPES},
                   sampled_waveform_hash_overlap=overlap,fingerprints=fingerprints)
     (a.output/'analysis.json').write_text(json.dumps(result,indent=2))
